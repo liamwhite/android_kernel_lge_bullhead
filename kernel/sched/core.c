@@ -83,6 +83,10 @@
 #include <asm/paravirt.h>
 #endif
 
+#ifdef CONFIG_ARM64
+#include <asm/perf_configure.h>
+#endif
+
 #include "sched.h"
 #include "../workqueue_internal.h"
 #include "../smpboot.h"
@@ -3721,6 +3725,16 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	u64 start, end;
 #endif
 
+#ifdef CONFIG_ARM64
+	int idx;
+
+	for (idx = 0; idx < ARMV8_PMU_MAX_COUNTERS; ++idx) {
+		prev->armv8pmu_countervalue[idx] += armv8pmu_read_counter(idx);
+	}
+
+	prev->armv8pmu_cycles += armv8pmu_read_cycles();
+#endif
+
 	prepare_task_switch(rq, prev, next);
 
 	mm = next->mm;
@@ -3772,6 +3786,11 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	switch_to(prev, next, prev);
 
 	barrier();
+
+#ifdef CONFIG_ARM64
+	armv8pmu_init_counters(next);
+#endif
+
 	/*
 	 * this_rq must be evaluated again because prev may have moved
 	 * CPUs since it called schedule(), thus the 'rq' on its stack

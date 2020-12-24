@@ -92,6 +92,9 @@
 #ifdef CONFIG_HARDWALL
 #include <asm/hardwall.h>
 #endif
+#ifdef CONFIG_ARM64
+#include <asm/perf_configure.h>
+#endif
 #include <trace/events/oom.h>
 #include "internal.h"
 #include "fd.h"
@@ -1447,6 +1450,138 @@ static const struct file_operations proc_pid_sched_init_task_load_operations = {
 };
 
 #endif	/* CONFIG_SCHED_HMP */
+
+#ifdef CONFIG_ARM64
+
+static int pmc_all_show(struct seq_file *m, void *v)
+{
+	struct inode *inode = m->private;
+	struct task_struct *p;
+	int idx;
+
+	p = get_proc_task(inode);
+	if (!p)
+		return -ESRCH;
+
+	seq_printf(m, "%c\t%lld\n", 'c', p->armv8pmu_cycles);
+
+	for (idx = 0; idx < 31; ++idx) {
+		seq_printf(m, "%d\t%lld\n", idx, p->armv8pmu_countervalue[idx]);
+	}
+
+	put_task_struct(p);
+
+	return 0;
+}
+
+static int pmc_all_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, pmc_all_show, inode);
+}
+
+static const struct file_operations pmc_all_operations = {
+	.open		= pmc_all_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release
+};
+
+#define PMC_REGISTER_ENTRY(name, task_struct_field)			\
+static int pmc_ ## name ## _show(struct seq_file *m, void *v)		\
+{ 									\
+	struct inode *inode = m->private;				\
+	struct task_struct *p;						\
+									\
+	p = get_proc_task(inode);					\
+	if (!p)								\
+		return -ESRCH; 						\
+									\
+	seq_printf(m, "%lld\n", task_struct_field);			\
+									\
+	put_task_struct(p);						\
+									\
+	return 0;							\
+}									\
+									\
+static ssize_t pmc_ ## name ## _write					\
+(struct file *file, const char __user *buf, size_t count, loff_t *offset) \
+{									\
+	struct inode *inode = file_inode(file);				\
+	struct task_struct *p;						\
+	char buffer[PROC_NUMBUF];					\
+									\
+	p = get_proc_task(inode);					\
+	if (!p)								\
+		return -ESRCH;						\
+									\
+	memset(buffer, 0, sizeof(buffer));				\
+									\
+	if (count > sizeof(buffer) - 1)					\
+		count = sizeof(buffer) - 1;				\
+									\
+	if (copy_from_user(buffer, buf, count))				\
+		return -EFAULT;						\
+									\
+	if (kstrtoull(buffer, 0, &task_struct_field))			\
+		return -EINVAL;						\
+									\
+	put_task_struct(p);						\
+									\
+	return count;							\
+}									\
+									\
+static int pmc_ ## name ## _open(struct inode *inode, struct file *filp) \
+{									\
+	return single_open(filp, pmc_ ## name ## _show, inode);		\
+}									\
+									\
+static const struct file_operations pmc_ ## name ## _operations = {	\
+	.open		= pmc_ ## name ## _open,			\
+	.read		= seq_read,					\
+	.write		= pmc_ ## name ## _write,			\
+	.llseek		= seq_lseek,					\
+	.release	= single_release				\
+};
+
+PMC_REGISTER_ENTRY(cycles, p->armv8pmu_cycles)
+
+#define PMC_REGISTER_PAIR(name, task_struct_index) \
+PMC_REGISTER_ENTRY(name, p->armv8pmu_countervalue[task_struct_index]) \
+PMC_REGISTER_ENTRY(name ## _select, p->armv8pmu_counterset[task_struct_index]) \
+
+PMC_REGISTER_PAIR(r0, 0)
+PMC_REGISTER_PAIR(r1, 1)
+PMC_REGISTER_PAIR(r2, 2)
+PMC_REGISTER_PAIR(r3, 3)
+PMC_REGISTER_PAIR(r4, 4)
+PMC_REGISTER_PAIR(r5, 5)
+PMC_REGISTER_PAIR(r6, 6)
+PMC_REGISTER_PAIR(r7, 7)
+PMC_REGISTER_PAIR(r8, 8)
+PMC_REGISTER_PAIR(r9, 9)
+PMC_REGISTER_PAIR(r10, 10)
+PMC_REGISTER_PAIR(r11, 11)
+PMC_REGISTER_PAIR(r12, 12)
+PMC_REGISTER_PAIR(r13, 13)
+PMC_REGISTER_PAIR(r14, 14)
+PMC_REGISTER_PAIR(r15, 15)
+PMC_REGISTER_PAIR(r16, 16)
+PMC_REGISTER_PAIR(r17, 17)
+PMC_REGISTER_PAIR(r18, 18)
+PMC_REGISTER_PAIR(r19, 19)
+PMC_REGISTER_PAIR(r20, 20)
+PMC_REGISTER_PAIR(r21, 21)
+PMC_REGISTER_PAIR(r22, 22)
+PMC_REGISTER_PAIR(r23, 23)
+PMC_REGISTER_PAIR(r24, 24)
+PMC_REGISTER_PAIR(r25, 25)
+PMC_REGISTER_PAIR(r26, 26)
+PMC_REGISTER_PAIR(r27, 27)
+PMC_REGISTER_PAIR(r28, 28)
+PMC_REGISTER_PAIR(r29, 29)
+PMC_REGISTER_PAIR(r30, 30)
+
+#endif
 
 #ifdef CONFIG_SCHED_AUTOGROUP
 /*
@@ -2900,6 +3035,48 @@ static const struct pid_entry tgid_base_stuff[] = {
 #endif
 #ifdef CONFIG_TASK_CPUFREQ_STATS
 	REG("cpufreq_stats",      S_IRUGO|S_IWUSR, proc_pid_cpufreq_stats_operations),
+#endif
+#ifdef CONFIG_ARM64
+	REG("pmc_all",    S_IRUGO, pmc_all_operations),
+
+#define REG_PMC_REGISTER(name) \
+	REG("pmc_" __stringify(name), S_IRUGO, pmc_ ## name ## _operations)
+#define REG_PMC_REGISTER_PAIR(name) \
+	REG_PMC_REGISTER(name), \
+	REG_PMC_REGISTER(name ## _select)
+
+	REG_PMC_REGISTER_PAIR(r0),
+	REG_PMC_REGISTER_PAIR(r1),
+	REG_PMC_REGISTER_PAIR(r2),
+	REG_PMC_REGISTER_PAIR(r3),
+	REG_PMC_REGISTER_PAIR(r4),
+	REG_PMC_REGISTER_PAIR(r5),
+	REG_PMC_REGISTER_PAIR(r6),
+	REG_PMC_REGISTER_PAIR(r7),
+	REG_PMC_REGISTER_PAIR(r8),
+	REG_PMC_REGISTER_PAIR(r9),
+	REG_PMC_REGISTER_PAIR(r10),
+	REG_PMC_REGISTER_PAIR(r11),
+	REG_PMC_REGISTER_PAIR(r12),
+	REG_PMC_REGISTER_PAIR(r13),
+	REG_PMC_REGISTER_PAIR(r14),
+	REG_PMC_REGISTER_PAIR(r15),
+	REG_PMC_REGISTER_PAIR(r16),
+	REG_PMC_REGISTER_PAIR(r17),
+	REG_PMC_REGISTER_PAIR(r18),
+	REG_PMC_REGISTER_PAIR(r19),
+	REG_PMC_REGISTER_PAIR(r20),
+	REG_PMC_REGISTER_PAIR(r21),
+	REG_PMC_REGISTER_PAIR(r22),
+	REG_PMC_REGISTER_PAIR(r23),
+	REG_PMC_REGISTER_PAIR(r24),
+	REG_PMC_REGISTER_PAIR(r25),
+	REG_PMC_REGISTER_PAIR(r26),
+	REG_PMC_REGISTER_PAIR(r27),
+	REG_PMC_REGISTER_PAIR(r28),
+	REG_PMC_REGISTER_PAIR(r29),
+	REG_PMC_REGISTER_PAIR(r30),
+	REG_PMC_REGISTER(cycles),
 #endif
 #ifdef CONFIG_SCHED_AUTOGROUP
 	REG("autogroup",  S_IRUGO|S_IWUSR, proc_pid_sched_autogroup_operations),

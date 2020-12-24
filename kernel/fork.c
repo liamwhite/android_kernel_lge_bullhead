@@ -79,6 +79,10 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_ARM64
+#include <asm/perf_configure.h>
+#endif
+
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
@@ -1292,6 +1296,15 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p = dup_task_struct(current);
 	if (!p)
 		goto fork_out;
+
+#ifdef CONFIG_ARM64
+	memset(&p->armv8pmu_counterset, 0, sizeof(p->armv8pmu_counterset));
+	memset(&p->armv8pmu_countervalue, 0, sizeof(p->armv8pmu_countervalue));
+
+	p->armv8pmu_cycles = 0;
+
+	armv8pmu_init_counters(p);
+#endif
 
 	ftrace_graph_init_task(p);
 

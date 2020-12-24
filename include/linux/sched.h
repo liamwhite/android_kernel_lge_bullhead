@@ -1566,6 +1566,12 @@ struct task_struct {
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	atomic_t ptrace_bp_refcnt;
 #endif
+#ifdef CONFIG_ARM64
+	/* Used for hardware performance monitoring */
+	u64		armv8pmu_counterset[31];
+	u64		armv8pmu_countervalue[31];
+	u64		armv8pmu_cycles;
+#endif
 #ifdef CONFIG_UPROBES
 	struct uprobe_task *utask;
 #endif
